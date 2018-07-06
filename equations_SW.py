@@ -11,47 +11,47 @@ from scipy.linalg         import eig
 
 # equations:
 
-# dt(up) + g*kp*h + 2*Om*i*C*up = - (u.grad u)_p
 # dt(um) + g*km*h - 2*Om*i*C*um = - (u.grad u)_m
+# dt(up) + g*kp*h + 2*Om*i*C*up = - (u.grad u)_p
 # dt(h) + H*kp*um + H*km*up = - kp*(h*u)_m - km*(h*u)_p
 # dt(c) = - (u.grad c)
 
-# variable order: up um h c
+# variable order: um up h c
 
 def shallow_water(S,m,params):
     """Defines M, L matrices for advection"""
         
-    g,H,Om  = params[0],params[1],params[2]
-
-    # (+,+)    
-    L00 = 2*Om*1j*S.op('C',m,+1)
-
-    # (+,-)
-    L01 = S.zeros(m,1,-1)
-
-    # (+,h)
-    L02 = g*S.op('k+',m,0)
-
-    # (+,c)
-    L03 = S.zeros(m,1,0)
-
-    # (-,+)
-    L10 = S.zeros(m,-1,1)
+    g,H,Om,a  = params[0],params[1],params[2],params[3]
 
     # (-,-)
-    L11 = -2*Om*1j*S.op('C',m,-1)
+    L00 = -2*Om*1j*S.op('C',m,-1)
+
+    # (-,+)
+    L01 = S.zeros(m,-1,1)
 
     # (-,h)
-    L12 = g*S.op('k-',m,0)
+    L02 = g*S.op('k-',m,0)/a
 
     # (-,c)
-    L13 = S.zeros(m,-1,0)
+    L03 = S.zeros(m,-1,0)
 
-    # (h,+)
-    L20 = H*S.op('k-',m,1)
+    # (+,-)
+    L10 = S.zeros(m,1,-1)
+
+    # (+,+)
+    L11 = 2*Om*1j*S.op('C',m,+1)
+
+    # (+,h)
+    L12 = g*S.op('k+',m,0)/a
+
+    # (+,c)
+    L13 = S.zeros(m,1,0)
 
     # (h,-)
-    L21 = H*S.op('k+',m,-1)
+    L20 = H*S.op('k+',m,-1)/a
+
+    # (h,+)
+    L21 = H*S.op('k-',m,1)/a
 
     # (h,h)
     L22 = S.zeros(m,0,0)
@@ -67,23 +67,23 @@ def shallow_water(S,m,params):
 
     L = sparse.bmat([[L00,L01,L02,L03],[L10,L11,L12,L13],[L20,L21,L22,L23],[L30,L31,L32,L33]])
 
-    R00 = S.op('I',m,1)
-    R01 = S.zeros(m,1,-1)
-    R02 = S.zeros(m,1,0)
-    R03 = S.zeros(m,1,0)
+    R00 = S.op('I',m,-1)
+    R01 = S.zeros(m,-1,1)
+    R02 = S.zeros(m,-1,0)
+    R03 = S.zeros(m,-1,0)
 
-    R10 = S.zeros(m,-1,1)
-    R11 = S.op('I',m,-1)
-    R12 = S.zeros(m,-1,0)
-    R13 = S.zeros(m,-1,0)
+    R10 = S.zeros(m,1,-1)
+    R11 = S.op('I',m,1)
+    R12 = S.zeros(m,1,0)
+    R13 = S.zeros(m,1,0)
 
-    R20 = S.zeros(m,0,1)
-    R21 = S.zeros(m,0,-1)
+    R20 = S.zeros(m,0,-1)
+    R21 = S.zeros(m,0,1)
     R22 = S.op('I',m,0)
     R23 = S.zeros(m,0,0)
 
-    R30 = S.zeros(m,0,1)
-    R31 = S.zeros(m,0,-1)
+    R30 = S.zeros(m,0,-1)
+    R31 = S.zeros(m,0,1)
     R32 = S.zeros(m,0,0)
     R33 = S.op('I',m,0)
 
@@ -93,10 +93,10 @@ def shallow_water(S,m,params):
 
 class StateVector:
 
-    def __init__(self,S,u,h,c):
+    def __init__(self,u,h,c):
         self.data = []
-        self.m_min = S.m_min
-        self.m_max = S.m_max
+        self.m_min = u.S.m_min
+        self.m_max = u.S.m_max
         self.len_u = []
         self.len_h = []
         for m in range(self.m_min,self.m_max+1):

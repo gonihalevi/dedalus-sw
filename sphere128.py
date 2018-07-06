@@ -76,8 +76,8 @@ def Y(L_max,m,s,cos_theta):
 
 def unitary(rank=1,adjoint=False):
     """ Transforms the components of vectors and tensors.
-        U:        (v[th],v[ph]) --> (v[+],v[-])
-        Uadjoint: (v[+],v[-])   --> (v[th],v[ph])
+        U:        (v[th],v[ph]) --> (v[-],v[+])
+        Uadjoint: (v[-],v[+])   --> (v[th],v[ph])
         
         Parameters
         ----------
@@ -91,9 +91,9 @@ def unitary(rank=1,adjoint=False):
     if rank == 0: return 1
 
     if adjoint :
-        U       = np.sqrt(0.5)*np.array([[1,1j],[1,-1j]])
+        U       = np.sqrt(0.5)*np.array([[1,-1j],[1,1j]])
     else:
-        U       = np.sqrt(0.5)*np.array([[1,1],[-1j,1j]])
+        U       = np.sqrt(0.5)*np.array([[1,1],[1j,-1j]])
     unitary = U
     for k in range(rank-1):
         unitary = np.kron(U,unitary)

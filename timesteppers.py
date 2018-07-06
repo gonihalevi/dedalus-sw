@@ -66,7 +66,7 @@ class MultistepIMEX:
         self._iteration = 0
         self._LHS_params = None
 
-    def step(self, dt, state_vector, B, L, M, P, NL, LU):
+    def step(self, dt, state_vector, S, L, M, P, NL, LU):
         """Advance solver by one timestep."""
 
         # References
@@ -97,41 +97,35 @@ class MultistepIMEX:
         if STORE_LU:
             update_LHS = ((a0, b0) != self._LHS_params)
             self._LHS_params = (a0, b0)
-            
-        ell_start = B.ell_min
-        ell_end = B.ell_max
-        m_start = B.m_min
-        m_end = B.m_max
+
+        m_start = S.m_min
+        m_end = S.m_max
         m_size = m_end - m_start + 1
 
-        for ell in range(ell_start,ell_end+1):
-            ell_local = ell-ell_start
-            P[ell_local] = a0*M[ell_local] + b0*L[ell_local]
-            for m in range(m_start,m_end+1):
-                m_local = m-m_start
-                index = ell_local*m_size+m_local
+        for m in range(m_start,m_end+1):
+            m_local = m-m_start
+            P[m_local] = a0*M[m_local] + b0*L[m_local]
+            MX0.data[m_local] = M[m_local].dot(state_vector.data[m_local])
+            LX0.data[m_local] = L[m_local].dot(state_vector.data[m_local])
+            F0.data[m_local] = NL.data[m_local]
 
-                MX0.data[index] = M[ell_local].dot(state_vector.data[index])
-                LX0.data[index] = L[ell_local].dot(state_vector.data[index])
-                F0.data[index] = NL.data[index]
+            # Build RHS
+            RHS.data[m_local] *= 0.
+            for j in range(1, len(c)):
+                RHS.data[m_local] += c[j] * F[j-1].data[m_local]
+            for j in range(1, len(a)):
+                RHS.data[m_local] -= a[j] * MX[j-1].data[m_local]
+            for j in range(1, len(b)):
+                RHS.data[m_local] -= b[j] * LX[j-1].data[m_local]
 
-                # Build RHS
-                RHS.data[index] *= 0.
-                for j in range(1, len(c)):
-                    RHS.data[index] += c[j] * F[j-1].data[index]
-                for j in range(1, len(a)):
-                    RHS.data[index] -= a[j] * MX[j-1].data[index]
-                for j in range(1, len(b)):
-                    RHS.data[index] -= b[j] * LX[j-1].data[index]
-
-                # Solve
-                if STORE_LU:
-                    if update_LHS:
-                        LU[ell_local] = linalg.splu(P[ell_local].tocsc(), permc_spec=PERMC_SPEC)
-                    pLHS = LU[ell_local]
-                    state_vector.data[index] = pLHS.solve(RHS.data[index])
-                else:
-                    state_vector.data[index] = linalg.spsolve(P[ell_local],RHS.data[index], use_umfpack=USE_UMFPACK, permc_spec=PERMC_SPEC)
+            # Solve
+            if STORE_LU:
+                if update_LHS:
+                    LU[m_local] = linalg.splu(P[m_local].tocsc(), permc_spec=PERMC_SPEC)
+                pLHS = LU[m_local]
+                state_vector.data[m_local] = pLHS.solve(RHS.data[m_local])
+            else:
+                state_vector.data[m_local] = linalg.spsolve(P[m_local],RHS.data[m_local], use_umfpack=USE_UMFPACK, permc_spec=PERMC_SPEC)
 
 class SBDF1(MultistepIMEX):
     """
@@ -351,6 +345,43 @@ class CNAB2(MultistepIMEX):
 
         return a, b, c
 
+class MCNAB2(MultistepIMEX):
+    """
+    2nd-order modified Crank-Nicolson Adams-Bashforth scheme [Wang 2008 eqn 2.10]
+
+    Implicit: 2nd-order modified Crank-Nicolson
+    Explicit: 2nd-order Adams-Bashforth
+
+    """
+
+    amax = 2
+    bmax = 2
+    cmax = 2
+
+    @classmethod
+    def compute_coefficients(self, timesteps, iteration):
+
+        if iteration < 1:
+            return SBDF1.compute_coefficients(timesteps, iteration)
+
+        a = np.zeros(self.amax+1)
+        b = np.zeros(self.bmax+1)
+        c = np.zeros(self.cmax+1)
+
+        k1, k0, *rest = timesteps
+
+        w1 = k1 / k0
+
+        a[0] = 1 / k1
+        a[1] = -1 / k1
+        b[0] = (8 + 1/w1) / 16
+        b[1] = (7 - 1/w1) / 16
+        b[2] = 1 / 16
+        c[1] = 1 + w1/2
+        c[2] = -w1 / 2
+
+        return a, b, c
+
 class RungeKuttaIMEX:
     """
     Base class for implicit-explicit multistep methods.
@@ -489,12 +520,12 @@ class RK222(RungeKuttaIMEX):
                   [0, 1-γ, γ]])
 
 
-class RKGFY(RungeKuttaIMEX):
+class RKHM(RungeKuttaIMEX):
     """2nd-order 2-stage scheme from Hollerbach and Marti"""
 
     stages = 2
 
-    c = np.array([0, 1, 1])
+    c = np.array([0, 0.5, 1])
 
     A = np.array([[  0,  0 , 0],
                   [  1,  0 , 0],
@@ -503,5 +534,3 @@ class RKGFY(RungeKuttaIMEX):
     H = np.array([[0   , 0  ,   0],
                   [0.5 , 0.5,   0],
                   [0.5 , 0  , 0.5]])
-
-

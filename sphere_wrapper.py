@@ -56,9 +56,9 @@ class Sphere:
     @CachedMethod
     def tensor_index(self,m,rank):
         num = np.arange(2**rank)
-        spin = (-1)**num
+        spin = (-1)**(1+num)
         for k in range(2,rank+1):
-            spin += ((-1)**(num//2**(k-1))).astype(np.int64)
+            spin += ((-1)**(1+num//2**(k-1))).astype(np.int64)
 
         if rank == 0: spin = [0]
 
@@ -124,9 +124,9 @@ class Sphere:
         half = 2**(rank_out-1)
         for i in range(2**(rank_out)):
             if i//half == 0:
-                operator = self.op('k+',m,spin_in[i%half])
-            else:
                 operator = self.op('k-',m,spin_in[i%half])
+            else:
+                operator = self.op('k+',m,spin_in[i%half])
 
             np.copyto( data_out[start_index_out[i]:end_index_out[i]],
                        operator.dot(data_in[start_index_in[i%half]:end_index_in[i%half]]) )
@@ -139,8 +139,8 @@ class Sphere:
         (start_index_out,end_index_out,spin_out) = self.tensor_index(m,rank_out)
 
         for i in range(2**(rank_out)):
-            op1 = self.op('k-',m,spin_out[i]+1)
-            op2 = self.op('k+',m,spin_out[i]-1)
+            op1 = self.op('k+',m,spin_out[i]-1)
+            op2 = self.op('k-',m,spin_out[i]+1)
 
             np.copyto( data_out[start_index_out[i]:end_index_out[i]],
                        op1.dot(data_in[start_index_in[2*i]:end_index_in[2*i]])

@@ -10,6 +10,7 @@ import os
 import dedalus.public as de
 import time
 import pathlib
+import timesteppers
 from mpi4py import MPI
 
 # Load config options
@@ -33,12 +34,12 @@ a = 10e3
 pole=False
 phi_0 = np.pi/2.
 theta_0 = 2*np.pi/3.
-w = 0.05 #width of initial perturbation
-amp = 10*H
+w = 0.3 #width of initial perturbation
+amp = (10-1)*H
 
 # Integration parameters
-dt = period/12000.  # timestep
-n_iterations = 25000  # total iterations
+dt = period/24000.  # timestep
+n_iterations = 10000  # total iterations
 n_output = 50  # data output cadence
 output_folder = 'output_files/offpole_rot/largeamp/'  # data output folder
 
@@ -80,8 +81,10 @@ u_rhs = sph.TensorField(1,S,domain)
 h_rhs = sph.TensorField(0,S,domain)
 c_rhs = sph.TensorField(0,S,domain)
 
-state_vector = eq.StateVector(S,u,h,c)
-RHS = eq.StateVector(S,u,h,c)
+state_vector = eq.StateVector(u,h,c)
+RHS = eq.StateVector(u,h,c)
+
+timestepper = timesteppers.SBDF2(eq.StateVector, u,h,c)
 
 # Add random perturbations to the spectral coefficients
 # rand = np.random.RandomState(seed=42)
@@ -110,18 +113,24 @@ RHS = eq.StateVector(S,u,h,c)
 
 if pole == False:
     h['g'] = amp*np.exp( -( theta-theta_0)**2/w**2 - (phi-phi_0)**2/w**2)
+    c['g'] = amp*np.exp( -( theta-theta_0)**2/w**2 - (phi-phi_0)**2/w**2)
 else:
     h['g'] = amp*np.exp( -( theta-theta_0)**2/w**2)
+    c['g'] = amp*np.exp( -( theta-theta_0)**2/w**2)
+
+#u['g'][1] = np.sin(theta)
 
 state_vector.pack(u,h,c)
 
 # build matrices
-P,M,L = [],[],[]
+P,M,L,LU = [],[],[],[]
+
 for m in range(m_start,m_end+1):
-    Mm,Lm = eq.shallow_water(S,m,[g,H,Om])
+    Mm,Lm = eq.shallow_water(S,m,[g,H,Om,a])
     M.append(Mm.astype(np.complex128))
     L.append(Lm.astype(np.complex128))
     P.append(0.*Mm.astype(np.complex128))
+    LU.append([None])
 
 # calculate RHS nonlinear terms from state_vector
 def nonlinear(state_vector,RHS):
@@ -139,18 +148,18 @@ def nonlinear(state_vector,RHS):
     uh.layout = 'g'
     c_rhs.layout = 'g'
     h_rhs.layout = 'g'
-    u_rhs['g'][0] = - (u['g'][0]*Du['g'][0] + u['g'][1]*Du['g'][2]) # add forcing
-    u_rhs['g'][1] = - (u['g'][0]*Du['g'][1] + u['g'][1]*Du['g'][3]) # add forcing
+    u_rhs['g'][0] = - (u['g'][0]*Du['g'][0] + u['g'][1]*Du['g'][2])/a # add forcing
+    u_rhs['g'][1] = - (u['g'][0]*Du['g'][1] + u['g'][1]*Du['g'][3])/a # add forcing
     uh['g'][0] = u['g'][0]*h['g'][0]
     uh['g'][1] = u['g'][1]*h['g'][0]
-    c_rhs['g'][0] = - (u['g'][0]*Dc['g'][0] + u['g'][1]*Dc['g'][1]) # add heating
+    c_rhs['g'][0] = - (u['g'][0]*Dc['g'][0] + u['g'][1]*Dc['g'][1])/a # add heating
     h_rhs['g'][0] = 0* ((H+h['g'][0])**2 - (H+h['g'][0])**4)
 
     divuh.layout = 'c'
     for m in range(m_start,m_end+1):
         md = m - m_start
         S.div(m,1,uh['c'][md],divuh['c'][md])
-        h_rhs['c'][md] -= divuh['c'][md]
+        h_rhs['c'][md] -= divuh['c'][md]/a
 
     RHS.pack(u_rhs,h_rhs,c_rhs)
 
@@ -159,15 +168,6 @@ file_num = 1
 if not os.path.exists(output_folder):
     os.mkdir(output_folder)
 t = 0
-
-# Combine matrices and perform LU decompositions for constant timestep
-for m in range(m_start,m_end+1):
-    md = m - m_start
-    Pmd = M[md] + dt*L[md]
-    if STORE_LU:
-        P[md] = spla.splu(Pmd.tocsc(), permc_spec=PERMC_SPEC)
-    else:
-        P[md] = Pmd
 
 start_time = time.time()
 # Main loop
@@ -206,14 +206,7 @@ for i in range(n_iterations):
             print('Iter:', i, 'Time:', t, 'h max:', np.max(np.abs(h_global)))
 
     nonlinear(state_vector,RHS)
-    for m in range(m_start,m_end+1):
-        md = m - m_start
-        RHS.data[md] = M[md].dot(state_vector.data[md]) + dt*(RHS.data[md])
-        if STORE_LU:
-            state_vector.data[md] = P[md].solve(RHS.data[md])
-        else:
-            state_vector.data[md] = spla.spsolve(P[md],RHS.data[md])
-
+    timestepper.step(dt, state_vector, S, L, M, P, RHS, LU)
     t += dt
 
 #    # imposing that the m=0 mode of u,h,c are purely real
