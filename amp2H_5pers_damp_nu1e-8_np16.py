@@ -5,7 +5,7 @@ Higher-order Navier Stokes on the sphere.
 import numpy as np
 from scipy.sparse import linalg as spla
 import sphere_wrapper as sph
-import equations_SW as eq
+import equations_SW_damp as eq
 import os
 import dedalus.public as de
 import time
@@ -30,18 +30,19 @@ Om2 = 1.885e-3
 Om = Om2
 period = 2*np.pi/Om2
 a = 10e3
+nu = 1e-8 
 
 pole=False
 phi_0 = np.pi
 theta_0 = 2*np.pi/3.
 w = 0.1 #width of initial perturbation
-amp = 10*H
+amp = 2*H
 
 # Integration parameters
-dt = period/24000.  # timestep
-n_iterations = 50  # total iterations
-n_output = 1  # data output cadence
-output_folder = 'output_files/offpole_rot/spherepack_compare/post_fix/'  # data output folder
+dt = period/12000.  # timestep
+n_iterations = 60000  # total iterations
+n_output = 600  # data output cadence
+output_folder = 'output_files/amp2H_5pers_damp_nu1e-8_np16/'  # data output folder
 
 # Find MPI rank
 comm = MPI.COMM_WORLD
@@ -124,7 +125,7 @@ state_vector.pack(u,h,c)
 P,M,L,LU = [],[],[],[]
 
 for m in range(m_start,m_end+1):
-    Mm,Lm = eq.shallow_water(S,m,[g,H,Om,a])
+    Mm,Lm = eq.shallow_water(S,m,[g,H,Om,a,nu])
     M.append(Mm.astype(np.complex128))
     L.append(Lm.astype(np.complex128))
     P.append(0.*Mm.astype(np.complex128))
